@@ -24,11 +24,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ✅ Multer (in-memory)
+// ✅ Multer Setup (In-Memory)
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ✅ User Schema & Model
+// ✅ Schemas & Models
 const User = mongoose.model("User", new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   email: { type: String, unique: true, required: true },
@@ -38,7 +38,16 @@ const User = mongoose.model("User", new mongoose.Schema({
   following: { type: Number, default: 0 },
 }));
 
-// ✅ Register
+const Video = mongoose.model("Video", new mongoose.Schema({
+  url: String,
+  public_id: String,
+  caption: String,
+  songId: String,
+  location: String,
+  uploadedAt: { type: Date, default: Date.now },
+}));
+
+// ✅ Register Route
 app.post("/api/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -61,7 +70,7 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// ✅ Login
+// ✅ Login Route
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -80,7 +89,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// ✅ Upload Video
+// ✅ Upload Video Route
 app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
   console.log("📥 Upload route hit");
 
@@ -93,19 +102,23 @@ app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
 
     const stream = cloudinary.uploader.upload_stream(
       { resource_type: "video" },
-      (err, result) => {
+      async (err, result) => {
         if (err) {
           console.error("❌ Cloudinary upload error:", err);
           return res.status(500).json({ message: "Upload failed", error: err });
         }
 
-        console.log("✅ Upload success:", result.secure_url);
-        res.status(200).json({
-          message: "Upload successful",
+        console.log("✅ Cloudinary upload successful:", result.secure_url);
+
+        const video = await Video.create({
           url: result.secure_url,
           public_id: result.public_id,
-          metadata: { caption, songId, location },
+          caption,
+          songId,
+          location,
         });
+
+        res.status(200).json({ message: "Upload successful", video });
       }
     );
 
@@ -116,8 +129,19 @@ app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
   }
 });
 
+// ✅ Get All Videos Route
+app.get("/api/videos", async (req, res) => {
+  try {
+    const videos = await Video.find().sort({ uploadedAt: -1 });
+    res.status(200).json(videos);
+  } catch (err) {
+    console.error("❌ Error fetching videos:", err);
+    res.status(500).json({ message: "Failed to fetch videos" });
+  }
+});
+
 // ✅ Start Server
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
 });
