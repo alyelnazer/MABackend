@@ -12,23 +12,23 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ✅ MongoDB Connection
+// ✅ MongoDB connection
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("✅ Connected to MongoDB"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// ✅ Cloudinary Config
+// ✅ Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ✅ Multer Setup (In-Memory)
+// ✅ Multer setup
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ✅ Schemas & Models
+// ✅ Mongoose models
 const User = mongoose.model("User", new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   email: { type: String, unique: true, required: true },
@@ -39,6 +39,7 @@ const User = mongoose.model("User", new mongoose.Schema({
 }));
 
 const Video = mongoose.model("Video", new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   url: String,
   public_id: String,
   caption: String,
@@ -47,7 +48,7 @@ const Video = mongoose.model("Video", new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now },
 }));
 
-// ✅ Register Route
+// ✅ Register
 app.post("/api/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -63,14 +64,14 @@ app.post("/api/register", async (req, res) => {
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || "secret", { expiresIn: "24h" });
 
-    res.status(201).json({ token, user });
+    res.status(201).json({ token, user: { ...user.toObject(), id: user._id } });
   } catch (err) {
     console.error("Register error:", err);
     res.status(500).json({ message: "Registration failed" });
   }
 });
 
-// ✅ Login Route
+// ✅ Login
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -82,22 +83,24 @@ app.post("/api/login", async (req, res) => {
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || "secret", { expiresIn: "24h" });
 
-    res.json({ token, user });
+    res.json({ token, user: { ...user.toObject(), id: user._id } });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ message: "Login failed" });
   }
 });
 
-// ✅ Upload Video Route
+// ✅ Upload video
 app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
-  console.log("📥 Upload route hit");
-
   try {
-    const { caption, songId, location } = req.body;
-    if (!req.file) {
-      console.error("❌ No video file uploaded");
-      return res.status(400).json({ message: "No file uploaded" });
+    const { caption, songId, location, userId } = req.body;
+    if (!req.file || !userId) {
+      return res.status(400).json({ message: "Missing video file or user ID" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
 
     const stream = cloudinary.uploader.upload_stream(
@@ -108,9 +111,8 @@ app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
           return res.status(500).json({ message: "Upload failed", error: err });
         }
 
-        console.log("✅ Cloudinary upload successful:", result.secure_url);
-
         const video = await Video.create({
+          userId,
           url: result.secure_url,
           public_id: result.public_id,
           caption,
@@ -129,7 +131,7 @@ app.post("/api/videos/upload", upload.single("video"), async (req, res) => {
   }
 });
 
-// ✅ Get All Videos Route
+// ✅ Get all videos
 app.get("/api/videos", async (req, res) => {
   try {
     const videos = await Video.find().sort({ uploadedAt: -1 });
@@ -140,7 +142,23 @@ app.get("/api/videos", async (req, res) => {
   }
 });
 
-// ✅ Start Server
+// ✅ ✅ ✅ FIXED: Get videos by user
+app.get("/api/users/:userId/videos", async (req, res) => {
+  const { userId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({ message: "Invalid user ID format" });
+  }
+
+  try {
+    const videos = await Video.find({ userId }).sort({ uploadedAt: -1 });
+    res.status(200).json(videos);
+  } catch (err) {
+    console.error("❌ Error fetching user videos:", err);
+    res.status(500).json({ message: "Failed to fetch user's videos" });
+  }
+});
+
+// ✅ Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
